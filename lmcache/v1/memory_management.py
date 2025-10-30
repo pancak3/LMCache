@@ -1038,7 +1038,7 @@ class PagedTensorMemoryAllocator(MemoryAllocatorInterface):
         num_elements = shape.numel()
         self.bytes_per_element = torch.tensor([], dtype=dtype).element_size()
         self.align_bytes = num_elements * self.bytes_per_element
-
+        self.buffer_size = self.buffer_size // self.align_bytes * self.align_bytes
         assert self.buffer_size % self.align_bytes == 0, (
             f"Buffer size {self.buffer_size} must be a"
             f" multiple of align bytes {self.align_bytes}"
