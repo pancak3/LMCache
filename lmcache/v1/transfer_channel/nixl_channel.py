@@ -328,6 +328,10 @@ class NixlChannel(BaseTransferChannel):
 
     async def _async_init_loop(self):
         # Initialize initialization side channels
+        print("[*] Starting NIXL async init loop")
+        print(f"[*] ZMQ context: {self.zmq_context}")
+        print(f"[*] Peer init URL: {self.peer_init_url}")
+
         self.init_side_channel = get_zmq_socket(
             self.zmq_context,
             self.peer_init_url,
@@ -345,12 +349,15 @@ class NixlChannel(BaseTransferChannel):
                 logger.info("Received initialization request")
 
                 req = msgspec.msgpack.decode(req_bytes, type=Union[NixlMsg, SideMsg])
+                print(f"[*] Received initialization request: {req}")
 
                 resp = self._handle_init_msg(req)
 
                 await self.init_side_channel.send(msgspec.msgpack.encode(resp))
 
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 logger.error("Failed to process initialization loop: %s", str(e))
                 if self.running:
                     time.sleep(0.01)
