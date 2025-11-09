@@ -349,7 +349,7 @@ class NixlChannel(BaseTransferChannel):
                 logger.info("Received initialization request")
 
                 req = msgspec.msgpack.decode(req_bytes, type=Union[NixlMsg, SideMsg])
-                print(f"[*] Received initialization request: {req}")
+                
 
                 resp = self._handle_init_msg(req)
 

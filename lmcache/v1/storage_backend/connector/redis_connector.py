@@ -138,6 +138,9 @@ class RedisConnector(RemoteConnector):
     async def _batched_put(
         self, keys: List[CacheEngineKey], memory_objs: List[MemoryObj]
     ):
+        # https://github.com/LMCache/LMCache/issues/1802
+        for i, (key, memory_obj) in enumerate(zip(keys, memory_objs)):
+            memory_obj.ref_count_down()
         # calling self.put will create a circular dependency
         await asyncio.gather(
             *(
