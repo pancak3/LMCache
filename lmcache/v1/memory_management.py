@@ -301,9 +301,11 @@ def _allocate_cpu_memory(
     size: int,
     numa_mapping: Optional[NUMAMapping] = None,
 ) -> torch.Tensor:
+    print(f"[*] Allocating {size} bytes of CPU memory")
     if size == 0:
         return torch.empty(0, dtype=torch.uint8)
     if numa_mapping:
+        print("[*] Allocating NUMA-aware pinned memory")
         if torch.cuda.is_available():
             current_device_id = torch.cuda.current_device()
         else:
@@ -313,14 +315,18 @@ def _allocate_cpu_memory(
             f"Current device {current_device_id} is not in the GPU NUMA mapping."
         )
         numa_id = gpu_to_numa_mapping[current_device_id]
+        print(f"[*] Current device ID: {current_device_id}, NUMA ID: {numa_id}")
         ptr = lmc_ops.alloc_pinned_numa_ptr(size, numa_id)
     else:
+        print("[*] Allocating pinned memory")
         ptr = lmc_ops.alloc_pinned_ptr(size, 0)
+    print(f"[*] Allocated memory pointer: {ptr}")
 
     array_type = ctypes.c_uint8 * size
     buf = array_type.from_address(ptr)
+    print(f"[*] Created ctypes buffer from pointer")
     buffer = torch.frombuffer(buf, dtype=torch.uint8)
-
+    print(f"[*] Created torch tensor from buffer")
     return buffer
 
 
