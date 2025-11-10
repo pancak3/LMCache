@@ -1500,7 +1500,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
               (2) byte_array buffer memory.
     """
 
-    def __init__(self, size: int, use_paging: bool = False, **kwargs):
+    def __init__(self, size: int, use_paging: bool = True, **kwargs):
         """
         :param int size: The size of the pinned memory in bytes.
         """
@@ -1508,8 +1508,9 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
         self.numa_mapping = kwargs.get("numa_mapping", None)
 
         self.size = size
-
+        print(f"Starting MixedMemoryAllocator with size: {size} bytes")
         self.buffer = _allocate_cpu_memory(size, self.numa_mapping)
+        print(f"MixedMemoryAllocator allocated buffer at ptr: {self.buffer.data_ptr()}")
 
         self._unregistered = False
 
@@ -1530,6 +1531,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
             )
         else:
             self.pin_allocator = TensorMemoryAllocator(self.buffer)
+        print(f"MixedMemoryAllocator allocated buffer at ptr: {self.buffer.data_ptr()}")
 
         self.align_bytes = self.pin_allocator.align_bytes
 

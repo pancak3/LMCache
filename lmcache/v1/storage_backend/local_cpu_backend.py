@@ -250,7 +250,7 @@ class LocalCPUBackend(AllocatorBackendInterface):
         # other backends might still (temporarily) hold the memory object.
         return True
 
-def _calculate_effective_cpu_size(
+    def _calculate_effective_cpu_size(
         self,
         configured_cpu_size: float,
         config: LMCacheEngineConfig,
