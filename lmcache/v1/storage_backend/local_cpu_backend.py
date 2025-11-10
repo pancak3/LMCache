@@ -250,7 +250,7 @@ class LocalCPUBackend(AllocatorBackendInterface):
         # other backends might still (temporarily) hold the memory object.
         return True
 
-    def _calculate_effective_cpu_size(
+def _calculate_effective_cpu_size(
         self,
         configured_cpu_size: float,
         config: LMCacheEngineConfig,
@@ -335,6 +335,7 @@ class LocalCPUBackend(AllocatorBackendInterface):
         cpu_size = self._calculate_effective_cpu_size(cpu_size, config, metadata)
 
         if config.enable_p2p:
+            logger.info("Initializing PagedCpuGpuMemoryAllocator for local CPU backend")
             assert metadata is not None
             meta_shape = torch.Size(metadata.kv_shape)
             # TODO(Jiayi): remove this hardcode
@@ -354,8 +355,12 @@ class LocalCPUBackend(AllocatorBackendInterface):
                 fmt=MemoryFormat.KV_2LTD,  # TODO: remove this hardcode
                 numa_mapping=numa_mapping,
             )
+            logger.info(
+                f"PagedCpuGpuMemoryAllocator initialized with CPU memory size: {cpu_size} GB"
+            )
             return paged_mem_allocator
         else:
+            logger.info("Initializing MixedMemoryAllocator for local CPU backend")
             return MixedMemoryAllocator(
                 int(cpu_size * 1024**3),
                 numa_mapping=numa_mapping,

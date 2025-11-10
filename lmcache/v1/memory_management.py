@@ -1534,7 +1534,9 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
         self.align_bytes = self.pin_allocator.align_bytes
 
         self.host_mem_lock = threading.Lock() if not use_paging else nullcontext()
-
+        logger.info(
+            f"MixedMemoryAllocator initialized with pinned memory size: {size} bytes"
+        )
         self.buffer_allocator = BufferAllocator("cpu")
 
     @_lmcache_nvtx_annotate
