@@ -253,11 +253,11 @@ class LocalCPUBackend(AllocatorBackendInterface):
         return True
 
     def _calculate_effective_cpu_size(
-            self,
-            configured_cpu_size: float,
-            config: LMCacheEngineConfig,
-            metadata: Optional[LMCacheEngineMetadata] = None,
-        ) -> float:
+        self,
+        configured_cpu_size: float,
+        config: LMCacheEngineConfig,
+        metadata: Optional[LMCacheEngineMetadata] = None,
+    ) -> float:
         """
         Calculate the effective CPU memory size based on system available memory
         and reserve memory configuration.
