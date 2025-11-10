@@ -253,11 +253,11 @@ class LocalCPUBackend(AllocatorBackendInterface):
         return True
 
     def _calculate_effective_cpu_size(
-        self,
-        configured_cpu_size: float,
-        config: LMCacheEngineConfig,
-        metadata: Optional[LMCacheEngineMetadata] = None,
-    ) -> float:
+            self,
+            configured_cpu_size: float,
+            config: LMCacheEngineConfig,
+            metadata: Optional[LMCacheEngineMetadata] = None,
+        ) -> float:
         """
         Calculate the effective CPU memory size based on system available memory
         and reserve memory configuration.
@@ -366,6 +366,9 @@ class LocalCPUBackend(AllocatorBackendInterface):
                 dtype=metadata.kv_dtype,
                 fmt=MemoryFormat.KV_2LTD,  # TODO: remove this hardcode
                 numa_mapping=numa_mapping,
+            )
+            logger.info(
+                f"PagedCpuGpuMemoryAllocator initialized with CPU memory size: {cpu_size} GB"
             )
             return paged_mem_allocator
         else:
