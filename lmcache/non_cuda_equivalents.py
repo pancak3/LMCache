@@ -46,6 +46,7 @@ def alloc_pinned_ptr(size: int, device_id: int = 0) -> int:
     to it. Note: Pinned memory is not supported on non-CUDA."""
 
     # Create a 1D uint8 CPU tensor, as uint8 == 1 byte
+    logger.info(f"[*] emptying pinned memory allocation of size {size} bytes")
     tensor = torch.empty(size, dtype=torch.uint8, pin_memory=False)
     logger.info(f"[*] Allocating pinned memory of size {size} bytes")
     # First-touch initialization (forces physical allocation)
