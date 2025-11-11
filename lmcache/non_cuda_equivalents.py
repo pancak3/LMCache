@@ -16,6 +16,7 @@ def alloc_pinned_numa_ptr(size: int, numa_id: int = 0) -> int:
     Note: NUMA and pinned memory are not supported on non-CUDA."""
 
     # Create a 1D uint8 CPU tensor, as uint8 == 1 byte
+    print(f"[*] Warning: NUMA-aware pinned memory allocation is not supported on non-CUDA. Proceeding with standard pinned memory allocation.")
     tensor = torch.empty(size, dtype=torch.uint8, pin_memory=False)
     print(f"[*] Allocating NUMA-aware pinned memory of size {size} bytes on NUMA node {numa_id}")
 
