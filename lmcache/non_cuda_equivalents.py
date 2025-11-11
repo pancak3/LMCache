@@ -47,14 +47,14 @@ def alloc_pinned_ptr(size: int, device_id: int = 0) -> int:
 
     # Create a 1D uint8 CPU tensor, as uint8 == 1 byte
     tensor = torch.empty(size, dtype=torch.uint8, pin_memory=False)
-    print(f"[*] Allocating pinned memory of size {size} bytes")
+    logger.info(f"[*] Allocating pinned memory of size {size} bytes")
     # First-touch initialization (forces physical allocation)
     tensor.fill_(0)
-    print(f"[*] First-touch initialization completed")
+    logger.info(f"[*] First-touch initialization completed")
     # Get a pointer to the start of the tensor object as this is what is
     # returned by the CUDA equivalent function
     ptr = tensor.data_ptr()
-    print(f"[*] Obtained data pointer: {ptr}")
+    logger.info(f"[*] Obtained data pointer: {ptr}")
     # Store the tensor so it can be accessed outide this function scope
     _tensor_registry[ptr] = tensor
 
