@@ -301,11 +301,11 @@ def _allocate_cpu_memory(
     size: int,
     numa_mapping: Optional[NUMAMapping] = None,
 ) -> torch.Tensor:
-    print(f"[*] Allocating {size} bytes of CPU memory")
+    logger.info(f"[*] Allocating {size} bytes of CPU memory")
     if size == 0:
         return torch.empty(0, dtype=torch.uint8)
     if numa_mapping:
-        print("[*] Allocating NUMA-aware pinned memory")
+        logger.info("[*] Allocating NUMA-aware pinned memory")
         if torch.cuda.is_available():
             current_device_id = torch.cuda.current_device()
         else:
@@ -315,18 +315,18 @@ def _allocate_cpu_memory(
             f"Current device {current_device_id} is not in the GPU NUMA mapping."
         )
         numa_id = gpu_to_numa_mapping[current_device_id]
-        print(f"[*] Current device ID: {current_device_id}, NUMA ID: {numa_id}")
+        logger.info(f"[*] Current device ID: {current_device_id}, NUMA ID: {numa_id}")
         ptr = lmc_ops.alloc_pinned_numa_ptr(size, numa_id)
     else:
-        print("[*] Allocating pinned memory")
+        logger.info("[*] Allocating pinned memory")
         ptr = lmc_ops.alloc_pinned_ptr(size, 0)
-    print(f"[*] Allocated memory pointer: {ptr}")
+    logger.info(f"[*] Allocated memory pointer: {ptr}")
 
     array_type = ctypes.c_uint8 * size
     buf = array_type.from_address(ptr)
-    print(f"[*] Created ctypes buffer from pointer")
+    logger.info(f"[*] Created ctypes buffer from pointer")
     buffer = torch.frombuffer(buf, dtype=torch.uint8)
-    print(f"[*] Created torch tensor from buffer")
+    logger.info(f"[*] Created torch tensor from buffer")
     return buffer
 
 
@@ -1514,9 +1514,9 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
         self.numa_mapping = kwargs.get("numa_mapping", None)
 
         self.size = size
-        print(f"Starting MixedMemoryAllocator with size: {size} bytes")
+        logger.info(f"Starting MixedMemoryAllocator with size: {size} bytes")
         self.buffer = _allocate_cpu_memory(size, self.numa_mapping)
-        print(f"MixedMemoryAllocator allocated buffer at ptr: {self.buffer.data_ptr()}")
+        logger.info(f"MixedMemoryAllocator allocated buffer at ptr: {self.buffer.data_ptr()}")
 
         self._unregistered = False
 
@@ -1537,7 +1537,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
             )
         else:
             self.pin_allocator = TensorMemoryAllocator(self.buffer)
-        print(f"MixedMemoryAllocator allocated buffer at ptr: {self.buffer.data_ptr()}")
+        logger.info(f"MixedMemoryAllocator allocated buffer at ptr: {self.buffer.data_ptr()}")
 
         self.align_bytes = self.pin_allocator.align_bytes
 
