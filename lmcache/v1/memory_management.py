@@ -1551,7 +1551,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
               (2) byte_array buffer memory.
     """
 
-    def __init__(self, size: int, use_paging: bool = True, **kwargs):
+    def __init__(self, size: int, use_paging: bool = False, **kwargs):
         """
         :param int size: The size of the pinned memory in bytes.
         """
@@ -1580,9 +1580,11 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
                 dtype=kwargs["dtype"],
                 fmt=kwargs["fmt"],
             )
+            logger.info(f"Paged tensor memory allocator created.")
         else:
             self.pin_allocator = TensorMemoryAllocator(self.buffer)
-        logger.info(f"MixedMemoryAllocator allocated buffer at ptr: {self.buffer.data_ptr()}")
+            logger.info(f"Tensor memory allocator created.")
+        
 
         self.align_bytes = self.pin_allocator.align_bytes
 
