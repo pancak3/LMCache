@@ -348,6 +348,7 @@ def InitializeUsageContext(
     metadata: LMCacheEngineMetadata,
     local_log: Optional[str] = None,
 ):
+    return
     server_url = urljoin(
         os.getenv("LMCACHE_USAGE_TRACK_URL", "http://stats.lmcache.ai:8080"), "context"
     )
