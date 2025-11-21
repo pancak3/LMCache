@@ -4,12 +4,12 @@
 # CUDA-specific operations.
 #
 # Third Party
+import weakref
 import torch
 import logging
 # Store the tensor objects in memory so that they can be accessed
 # outside the scope of this file
-_tensor_registry: dict[int, torch.Tensor] = {}
-
+_tensor_registry: weakref.WeakValueDictionary[int, torch.Tensor] = weakref.WeakValueDictionary()
 logger = logging.getLogger(__name__)
 
 def alloc_pinned_numa_ptr(size: int, numa_id: int = 0) -> int:
