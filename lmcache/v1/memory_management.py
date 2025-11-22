@@ -321,7 +321,7 @@ def _allocate_cpu_memory(
         ptr = lmc_ops.alloc_pinned_numa_ptr(size, numa_id)
     else:
         logger.info("[*] Allocating pinned memory")
-        ptr = lmc_ops.alloc_pinned_ptr(size, 0)
+        ptr = lmc_ops.alloc_pinned_ptr(size, 4)
     logger.info(f"[*] Allocated memory pointer: {ptr}")
 
     array_type = ctypes.c_uint8 * size
