@@ -446,9 +446,9 @@ void multi_layer_kv_transfer(
 
     int64_t* key_value_ptr = reinterpret_cast<int64_t*>(key_value_device.data_ptr());
     int64_t** page_buffer_ptrs = reinterpret_cast<int64_t**>(
-      key_value_ptrs_device.data_ptr<int64_t>());
+      key_value_ptrs_device.data_ptr());
     const int64_t* slot_mapping_ptr =
-      slot_mapping_device.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(slot_mapping_device.data_ptr());
 
     int num_layers = key_value_device.size(1);
     int num_tokens = slot_mapping_device.size(0);
@@ -537,9 +537,9 @@ void multi_layer_kv_transfer_unilateral(
 
     int64_t* key_value_ptr = reinterpret_cast<int64_t*>(key_value_device.data_ptr());
     int64_t** page_buffer_ptrs = reinterpret_cast<int64_t**>(
-      key_value_ptrs_device.data_ptr<int64_t>());
+      key_value_ptrs_device.data_ptr());
     const int64_t* slot_mapping_ptr =
-      slot_mapping_device.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(slot_mapping_device.data_ptr());
 
     int num_layers = key_value_device.size(1);
     int num_tokens = slot_mapping_device.size(0);
@@ -626,7 +626,7 @@ void single_layer_kv_transfer(
     int64_t* vllm_key_value_cache_ptr =
       reinterpret_cast<int64_t*>(vllm_key_value_cache.data_ptr());
     const int64_t* slot_mapping_ptr =
-      slot_mapping_device.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(slot_mapping_device.data_ptr());
 
   int elements_per_entry = 8 / vllm_key_value_cache.element_size();
 
@@ -719,7 +719,7 @@ void load_and_reshape_flash(
     int64_t* key_cache_ptr = reinterpret_cast<int64_t*>(key_cache.data_ptr());
     int64_t* value_cache_ptr = reinterpret_cast<int64_t*>(value_cache.data_ptr());
     const int64_t* slot_mapping_ptr =
-      slot_mapping_device.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(slot_mapping_device.data_ptr());
 
   int elements_per_entry = 8 / key_cache.element_size();
 
@@ -778,7 +778,7 @@ void reshape_and_cache_back_flash(
     int64_t* value_cache_ptr = reinterpret_cast<int64_t*>(value_cache.data_ptr());
     int64_t* key_value_ptr = reinterpret_cast<int64_t*>(key_value_device.data_ptr());
     const int64_t* slot_mapping_ptr =
-      slot_mapping_device.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(slot_mapping_device.data_ptr());
 
   int elements_per_entry = 8 / key_cache.element_size();
 
@@ -852,7 +852,7 @@ void single_layer_kv_transfer_sgl(
     int64_t* sgl_value_cache_ptr = reinterpret_cast<int64_t*>(sgl_value_cache.data_ptr());
 
     const int64_t* slot_mapping_ptr =
-      slot_mapping_device.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(slot_mapping_device.data_ptr());
 
   int elements_per_entry = 8 / sgl_key_cache.element_size();
 
