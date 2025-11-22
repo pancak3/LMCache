@@ -12,19 +12,16 @@
 
 uintptr_t alloc_pinned_ptr(size_t size, unsigned int flags) {
   void* ptr = nullptr;
-  std::cout << "[*] Allocating pinned memory of size: " << size << " bytes, flags: " << flags << "\n";
-  cudaError_t err = cudaHostAlloc(&ptr, size, flags);
-  if (err != cudaSuccess) {
-    throw std::runtime_error("cudaHostAlloc failed: " + std::to_string(err));
+  std::cout << "[*] Allocating standard memory of size: " << size << " bytes, flags: " << flags << "\n";
+  ptr = std::malloc(size);
+  if (!ptr) {
+    throw std::runtime_error("std::malloc failed");
   }
   return reinterpret_cast<uintptr_t>(ptr);
 }
 
 void free_pinned_ptr(uintptr_t ptr) {
-  cudaError_t err = cudaFreeHost(reinterpret_cast<void*>(ptr));
-  if (err != cudaSuccess) {
-    throw std::runtime_error("cudaFreeHost failed: " + std::to_string(err));
-  }
+  std::free(reinterpret_cast<void*>(ptr));
 }
 
 static void first_touch(void* p, size_t size) {
@@ -60,25 +57,11 @@ uintptr_t alloc_pinned_numa_ptr(size_t size, int node) {
 
   first_touch(ptr, size);
 
-  cudaError_t st = cudaHostRegister(ptr, size, 0);
-  if (st != cudaSuccess) {
-    munmap(ptr, size);
-    throw std::runtime_error(std::string("cudaHostRegister failed: ") +
-                             cudaGetErrorString(st));
-  }
-
   return reinterpret_cast<uintptr_t>(ptr);
 }
 
 void free_pinned_numa_ptr(uintptr_t ptr, size_t size) {
   void* p = reinterpret_cast<void*>(ptr);
-  // Unpin first, then unmap.
-  cudaError_t st = cudaHostUnregister(p);
-  if (st != cudaSuccess) {
-    munmap(p, size);
-    throw std::runtime_error(std::string("cudaHostUnregister failed: ") +
-                             cudaGetErrorString(st));
-  }
   if (munmap(p, size) != 0) {
     throw std::runtime_error(std::string("munmap failed: ") + strerror(errno));
   }
