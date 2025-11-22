@@ -608,6 +608,7 @@ class NixlStorageBackend(AllocatorBackendInterface):
             metadata.worker_id,
         )
 
+<<<<<<< HEAD
         if corrected_device == "cpu":
             self.buffer = _allocate_cpu_memory(config.nixl_buffer_size)
             self.free_pinned_buffer = True
@@ -615,6 +616,16 @@ class NixlStorageBackend(AllocatorBackendInterface):
             base_buffer, self.buffer = _allocate_gpu_memory(
                 config.nixl_buffer_size, corrected_device
             )
+=======
+        buffer = torch.empty(
+            config.nixl_buffer_size,
+            dtype=torch.uint8,
+            device=corrected_device,
+        )
+
+        if corrected_device != "cpu":
+            logger.info(f"Setting cuda device to {corrected_device} ")
+>>>>>>> d11c0c9 (lmcache logging)
             torch.cuda.set_device(corrected_device)
             self.base_buffer = base_buffer  # Prevents early GC of the aligned tensor.
             self.free_pinned_buffer = False

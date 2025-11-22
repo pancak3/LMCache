@@ -1429,11 +1429,7 @@ class LMCacheEngineBuilder:
                 device=corrected_device,
             )
 
-            if corrected_device == "cpu":
-                torch.cuda.cudart().cudaHostRegister(
-                    buffer.data_ptr(), config.nixl_buffer_size, 0
-                )
-            else:
+            if corrected_device != "cpu":
                 logger.info(f"Setting cuda device to {corrected_device} ")
                 torch.cuda.set_device(corrected_device)
 
