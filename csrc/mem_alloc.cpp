@@ -11,6 +11,7 @@
 
 uintptr_t alloc_pinned_ptr(size_t size, unsigned int flags) {
   void* ptr = nullptr;
+  std::cout << "[*] Allocating pinned memory of size: " << size << " bytes, flags: " << flags << "\n";
   cudaError_t err = cudaHostAlloc(&ptr, size, flags);
   if (err != cudaSuccess) {
     throw std::runtime_error("cudaHostAlloc failed: " + std::to_string(err));
