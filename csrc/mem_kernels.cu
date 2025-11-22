@@ -425,7 +425,7 @@ void multi_layer_kv_transfer(
     torch::Tensor slot_mapping_device =
       ensure_tensor_on_device(slot_mapping, paged_memory_device);
 
-    int64_t* key_value_ptr = key_value_device.data_ptr<int64_t>();
+    int64_t* key_value_ptr = reinterpret_cast<int64_t*>(key_value_device.data_ptr());
     int64_t** page_buffer_ptrs = reinterpret_cast<int64_t**>(
       key_value_ptrs_device.data_ptr<int64_t>());
     const int64_t* slot_mapping_ptr =
@@ -516,7 +516,7 @@ void multi_layer_kv_transfer_unilateral(
     torch::Tensor slot_mapping_device =
       ensure_tensor_on_device(slot_mapping, paged_memory_device);
 
-    int64_t* key_value_ptr = key_value_device.data_ptr<int64_t>();
+    int64_t* key_value_ptr = reinterpret_cast<int64_t*>(key_value_device.data_ptr());
     int64_t** page_buffer_ptrs = reinterpret_cast<int64_t**>(
       key_value_ptrs_device.data_ptr<int64_t>());
     const int64_t* slot_mapping_ptr =
@@ -601,9 +601,9 @@ void single_layer_kv_transfer(
       ensure_tensor_on_device(slot_mapping, target_device);
 
     int64_t* lmc_key_value_cache_ptr =
-      lmc_key_value_cache_device.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(lmc_key_value_cache_device.data_ptr());
     int64_t* vllm_key_value_cache_ptr =
-      vllm_key_value_cache.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(vllm_key_value_cache.data_ptr());
     const int64_t* slot_mapping_ptr =
       slot_mapping_device.data_ptr<int64_t>();
 
@@ -680,9 +680,9 @@ void load_and_reshape_flash(
     torch::Tensor slot_mapping_device =
       ensure_tensor_on_device(slot_mapping, target_device);
 
-    int64_t* key_value_ptr = key_value_device.data_ptr<int64_t>();
-    int64_t* key_cache_ptr = key_cache.data_ptr<int64_t>();
-    int64_t* value_cache_ptr = value_cache.data_ptr<int64_t>();
+    int64_t* key_value_ptr = reinterpret_cast<int64_t*>(key_value_device.data_ptr());
+    int64_t* key_cache_ptr = reinterpret_cast<int64_t*>(key_cache.data_ptr());
+    int64_t* value_cache_ptr = reinterpret_cast<int64_t*>(value_cache.data_ptr());
     const int64_t* slot_mapping_ptr =
       slot_mapping_device.data_ptr<int64_t>();
 
@@ -739,9 +739,9 @@ void reshape_and_cache_back_flash(
     torch::Tensor slot_mapping_device =
       ensure_tensor_on_device(slot_mapping, target_device);
 
-    int64_t* key_cache_ptr = key_cache.data_ptr<int64_t>();
-    int64_t* value_cache_ptr = value_cache.data_ptr<int64_t>();
-    int64_t* key_value_ptr = key_value_device.data_ptr<int64_t>();
+    int64_t* key_cache_ptr = reinterpret_cast<int64_t*>(key_cache.data_ptr());
+    int64_t* value_cache_ptr = reinterpret_cast<int64_t*>(value_cache.data_ptr());
+    int64_t* key_value_ptr = reinterpret_cast<int64_t*>(key_value_device.data_ptr());
     const int64_t* slot_mapping_ptr =
       slot_mapping_device.data_ptr<int64_t>();
 
@@ -811,10 +811,10 @@ void single_layer_kv_transfer_sgl(
       ensure_tensor_on_device(slot_mapping, target_device);
 
     int64_t* lmc_key_value_cache_ptr =
-      lmc_key_value_cache_device.data_ptr<int64_t>();
+      reinterpret_cast<int64_t*>(lmc_key_value_cache_device.data_ptr());
 
-    int64_t* sgl_key_cache_ptr = sgl_key_cache.data_ptr<int64_t>();
-    int64_t* sgl_value_cache_ptr = sgl_value_cache.data_ptr<int64_t>();
+    int64_t* sgl_key_cache_ptr = reinterpret_cast<int64_t*>(sgl_key_cache.data_ptr());
+    int64_t* sgl_value_cache_ptr = reinterpret_cast<int64_t*>(sgl_value_cache.data_ptr());
 
     const int64_t* slot_mapping_ptr =
       slot_mapping_device.data_ptr<int64_t>();
