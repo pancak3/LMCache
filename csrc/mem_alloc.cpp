@@ -1,22 +1,23 @@
-#include <cuda_runtime.h>
 #include <stdexcept>
 #include <string>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-#include <errno.h>
+#include <cerrno>
+#include <cstdlib>
 #include <cstring>            // for strerror
 #include <linux/mempolicy.h>  // for MPOL_BIND, MPOL_MF_MOVE, MPOL_MF_STRICT
 #include "mem_alloc.h"
 #include <iostream>
 
 uintptr_t alloc_pinned_ptr(size_t size, unsigned int flags) {
-  void* ptr = nullptr;
-  std::cout << "[*] Allocating standard memory of size: " << size << " bytes, flags: " << flags << "\n";
-  ptr = std::malloc(size);
-  if (!ptr) {
-    throw std::runtime_error("std::malloc failed");
+  (void)flags;
+  void* ptr = std::malloc(size);
+  std::cout << "[*] Allocating host memory of size: " << size << " bytes\n";
+  if (ptr == nullptr) {
+    throw std::bad_alloc();
   }
+  std::memset(ptr, 0, size);
   return reinterpret_cast<uintptr_t>(ptr);
 }
 

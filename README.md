@@ -55,6 +55,7 @@ By combining LMCache with vLLM, developers achieve 3-10x delay savings and GPU c
   * Disk
   * [NIXL](https://github.com/ai-dynamo/nixl)
 - [x] Installation support through pip and latest vLLM
+- [x] Compatible with environments that disallow zero-copy/pinned host memory; all GPU transfers now use explicit staging buffers.
 
 ## Installation
 

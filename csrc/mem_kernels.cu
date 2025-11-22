@@ -318,16 +318,65 @@ __global__ void load_and_reshape_multi_layer_kernel_unilateral(
 
 }  // namespace lmc
 
-template <typename T, typename TENSOR_TYPE>
-T* get_kernel_ptr(TENSOR_TYPE& tensor) {
-  // Get the kernel-accessible pointer of the given type T
-  torch::Device device = tensor.device();
-  if (device.is_cuda()) {
-    return static_cast<T*>(tensor.data_ptr());
-  } else {
-    TORCH_CHECK(false, "Tensor must be on CUDA device.");
+namespace {
+
+class TensorDeviceTransfer {
+ public:
+  TensorDeviceTransfer(torch::Tensor& tensor, const c10::Device& device,
+                       bool copy_to_device, bool copy_back)
+      : original_(tensor),
+        device_tensor_(tensor),
+        needs_copy_back_(false),
+        uses_temp_buffer_(false) {
+    if (tensor.device().is_cuda()) {
+      TORCH_CHECK(
+          tensor.device() == device,
+          "Tensor already on CUDA device but does not match target device");
+      // Kernel can write directly into the existing tensor; nothing else to do.
+      return;
+    }
+
+    uses_temp_buffer_ = true;
+    auto options = tensor.options().device(device);
+    device_tensor_ = torch::empty_like(tensor, options);
+    if (copy_to_device && tensor.numel() > 0) {
+      device_tensor_.copy_(tensor, /*non_blocking=*/false);
+    }
+    needs_copy_back_ = copy_back;
   }
+
+  torch::Tensor& tensor() { return device_tensor_; }
+
+  void copy_back() {
+    if (uses_temp_buffer_ && needs_copy_back_ && device_tensor_.defined()) {
+      original_.copy_(device_tensor_, /*non_blocking=*/false);
+    }
+  }
+
+ private:
+  torch::Tensor original_;
+  torch::Tensor device_tensor_;
+  bool needs_copy_back_;
+  bool uses_temp_buffer_;
+};
+
+torch::Tensor ensure_tensor_on_device(const torch::Tensor& tensor,
+                                      const c10::Device& device) {
+  if (tensor.device().is_cuda()) {
+    TORCH_CHECK(tensor.device() == device,
+                "Tensor already on CUDA device but not on target device");
+    return tensor;
+  }
+
+  auto options = tensor.options().device(device);
+  torch::Tensor tmp = torch::empty_like(tensor, options);
+  if (tensor.numel() > 0) {
+    tmp.copy_(tensor, /*non_blocking=*/false);
+  }
+  return tmp;
 }
+
+}  // namespace
 
 /**
  * Quickly offload KV cache from vLLM paged memory to the offloading buffer
@@ -356,7 +405,7 @@ T* get_kernel_ptr(TENSOR_TYPE& tensor) {
  */
 void multi_layer_kv_transfer(
     torch::Tensor&
-        key_value,  // key/value must be on cpu (non-pinned).
+        key_value,  // key/value must be on gpu/pinned cpu.
                     // [2, num_layer, num_tokens, num_heads*head_size] for
                     // flash_attn.
                     // [1, num_layer, num_tokens, aligned_head_size]
@@ -366,31 +415,26 @@ void multi_layer_kv_transfer(
     const torch::Tensor& slot_mapping,    // [num_tokens],
     const torch::Device& paged_memory_device, const int page_buffer_size,
     const bool direction, const bool use_mla) {
-  // Allocate GPU buffer for key_value since it's on CPU non-pinned
-  torch::Tensor gpu_key_value = torch::empty_like(key_value, torch::device(torch::kCUDA, 0));
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    TensorDeviceTransfer key_value_transfer(
+      key_value, paged_memory_device, /*copy_to_device=*/!direction,
+      /*copy_back=*/direction);
+    torch::Tensor key_value_device = key_value_transfer.tensor();
 
-  if (direction) {  // PagedBuffer to LMCache: need to copy back after kernel
-    // No initial copy needed
-  } else {  // LMCache to PagedBuffer: copy CPU to GPU first
-    cudaMemcpyAsync(gpu_key_value.data_ptr(), key_value.data_ptr(), key_value.numel() * key_value.element_size(), cudaMemcpyHostToDevice, stream);
-  }
+    torch::Tensor key_value_ptrs_device =
+      ensure_tensor_on_device(key_value_ptrs, paged_memory_device);
+    torch::Tensor slot_mapping_device =
+      ensure_tensor_on_device(slot_mapping, paged_memory_device);
 
-  int64_t* key_value_ptr = static_cast<int64_t*>(gpu_key_value.data_ptr());
-  int64_t** page_buffer_ptrs =
-      get_kernel_ptr<int64_t*, const torch::Tensor>(key_value_ptrs);
+    int64_t* key_value_ptr = key_value_device.data_ptr<int64_t>();
+    int64_t** page_buffer_ptrs = reinterpret_cast<int64_t**>(
+      key_value_ptrs_device.data_ptr<int64_t>());
+    const int64_t* slot_mapping_ptr =
+      slot_mapping_device.data_ptr<int64_t>();
 
-  torch::Tensor gpu_slot_mapping = slot_mapping;
-  if (slot_mapping.device().is_cpu()) {
-    gpu_slot_mapping = slot_mapping.to(torch::device(torch::kCUDA, 0));
-  }
-  const int64_t* slot_mapping_ptr =
-      get_kernel_ptr<const int64_t, const torch::Tensor>(gpu_slot_mapping);
-
-  int num_layers = key_value.size(1);
-  int num_tokens = slot_mapping.size(0);
-  int num_origin_elements = key_value.size(3);
-  int elements_per_qword = 8 / key_value.element_size();
+    int num_layers = key_value_device.size(1);
+    int num_tokens = slot_mapping_device.size(0);
+    int num_origin_elements = key_value_device.size(3);
+    int elements_per_qword = 8 / key_value_device.element_size();
   int num_qwords = num_origin_elements / elements_per_qword;
 
   int k_or_v_size = 2;
@@ -398,10 +442,11 @@ void multi_layer_kv_transfer(
     k_or_v_size = 1;
   }
 
-  dim3 grid(key_value.size(2), num_layers, k_or_v_size);
+    dim3 grid(key_value_device.size(2), num_layers, k_or_v_size);
   dim3 block(std::min(num_qwords, 128));
 
   const at::cuda::OptionalCUDAGuard device_guard(paged_memory_device);
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   if (not direction) {
     lmc::load_and_reshape_multi_layer_kernel<int64_t, false>
@@ -415,9 +460,9 @@ void multi_layer_kv_transfer(
                                      slot_mapping_ptr, num_qwords, num_tokens,
                                      num_layers, page_buffer_size);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    // Copy back from GPU to CPU
-    cudaMemcpyAsync(key_value.data_ptr(), gpu_key_value.data_ptr(), key_value.numel() * key_value.element_size(), cudaMemcpyDeviceToHost, stream);
   }
+
+  key_value_transfer.copy_back();
 }
 
 /**
@@ -449,7 +494,7 @@ void multi_layer_kv_transfer_unilateral(
     torch::Tensor&
         key_value,  // [2, num_layer, num_tokens, num_heads*head_size] for
                     // flash_attn [1, num_layer, num_tokens, aligned_head_size]
-                    // for MLA key/value must be on cpu (non-pinned)
+                    // for MLA key/value must be on gpu/pinned cpu
 
     const torch::Tensor& key_value_ptrs,  // [num_layers*2]
     const torch::Tensor& slot_mapping,    // [num_tokens],
@@ -461,39 +506,36 @@ void multi_layer_kv_transfer_unilateral(
                                    direction, use_mla);
   }
 
-  // Allocate GPU buffer for key_value since it's on CPU non-pinned
-  torch::Tensor gpu_key_value = torch::empty_like(key_value, torch::device(torch::kCUDA, 0));
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    TensorDeviceTransfer key_value_transfer(
+      key_value, paged_memory_device, /*copy_to_device=*/!direction,
+      /*copy_back=*/direction);
+    torch::Tensor key_value_device = key_value_transfer.tensor();
 
-  if (direction) {  // PagedBuffer to LMCache: need to copy back after kernel
-    // No initial copy needed
-  } else {  // LMCache to PagedBuffer: copy CPU to GPU first
-    cudaMemcpyAsync(gpu_key_value.data_ptr(), key_value.data_ptr(), key_value.numel() * key_value.element_size(), cudaMemcpyHostToDevice, stream);
-  }
+    torch::Tensor key_value_ptrs_device =
+      ensure_tensor_on_device(key_value_ptrs, paged_memory_device);
+    torch::Tensor slot_mapping_device =
+      ensure_tensor_on_device(slot_mapping, paged_memory_device);
 
-  int64_t* key_value_ptr = static_cast<int64_t*>(gpu_key_value.data_ptr());
-  int64_t** page_buffer_ptrs =
-      get_kernel_ptr<int64_t*, const torch::Tensor>(key_value_ptrs);
+    int64_t* key_value_ptr = key_value_device.data_ptr<int64_t>();
+    int64_t** page_buffer_ptrs = reinterpret_cast<int64_t**>(
+      key_value_ptrs_device.data_ptr<int64_t>());
+    const int64_t* slot_mapping_ptr =
+      slot_mapping_device.data_ptr<int64_t>();
 
-  torch::Tensor gpu_slot_mapping = slot_mapping;
-  if (slot_mapping.device().is_cpu()) {
-    gpu_slot_mapping = slot_mapping.to(torch::device(torch::kCUDA, 0));
-  }
-  const int64_t* slot_mapping_ptr =
-      get_kernel_ptr<const int64_t, const torch::Tensor>(gpu_slot_mapping);
-
-  int num_layers = key_value.size(1);
-  int num_tokens = slot_mapping.size(0);
-  int num_origin_elements = key_value.size(3);
-  int elements_per_qword = 8 / key_value.element_size();
+    int num_layers = key_value_device.size(1);
+    int num_tokens = slot_mapping_device.size(0);
+    int num_origin_elements = key_value_device.size(3);
+    int elements_per_qword = 8 / key_value_device.element_size();
   int num_qwords = num_origin_elements / elements_per_qword;
 
   int k_or_v_size = 2;
 
-  dim3 grid(key_value.size(2), key_value.size(1), k_or_v_size);
+  dim3 grid(key_value_device.size(2), key_value_device.size(1),
+            k_or_v_size);
   dim3 block(std::min(num_qwords, 128));
 
   const at::cuda::OptionalCUDAGuard device_guard(paged_memory_device);
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   if (not direction) {
     lmc::load_and_reshape_multi_layer_kernel_unilateral<int64_t, false>
@@ -507,9 +549,9 @@ void multi_layer_kv_transfer_unilateral(
                                      slot_mapping_ptr, num_qwords, num_tokens,
                                      num_layers, page_buffer_size);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    // Copy back from GPU to CPU
-    cudaMemcpyAsync(key_value.data_ptr(), gpu_key_value.data_ptr(), key_value.numel() * key_value.element_size(), cudaMemcpyDeviceToHost, stream);
   }
+
+  key_value_transfer.copy_back();
 }
 
 void single_layer_kv_transfer(
@@ -520,7 +562,6 @@ void single_layer_kv_transfer(
     torch::Tensor& lmc_key_value_cache,  // [num_tokens, 2, num_heads*head_size]
                                          // or
                                          // [2, num_tokens, num_heads*head_size]
-                                         // must be on cpu (non-pinned)
 
     // torch::Tensor&
     //     vllm_key_cache,  // [num_blocks, block_size, num_heads, head_size]
@@ -546,46 +587,47 @@ void single_layer_kv_transfer(
                                // [num_blocks, 2, block_size, num_heads,
                                // head_size]
 ) {
-  // Allocate GPU buffer for lmc_key_value_cache since it's on CPU non-pinned
-  torch::Tensor gpu_lmc_key_value_cache = torch::empty_like(lmc_key_value_cache, torch::device(torch::kCUDA, 0));
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  // int64_t* lmc_key_cache_ptr = get_kernel_ptr<int64_t,
+  // torch::Tensor>(lmc_key_cache); int64_t* lmc_value_cache_ptr =
+  // get_kernel_ptr<int64_t, torch::Tensor>(lmc_value_cache);
+    const c10::Device target_device = vllm_key_value_cache.device();
 
-  if (direction) {  // PagedBuffer to LMCache: need to copy back after kernel
-    // No initial copy needed
-  } else {  // LMCache to PagedBuffer: copy CPU to GPU first
-    cudaMemcpyAsync(gpu_lmc_key_value_cache.data_ptr(), lmc_key_value_cache.data_ptr(), lmc_key_value_cache.numel() * lmc_key_value_cache.element_size(), cudaMemcpyHostToDevice, stream);
-  }
+    TensorDeviceTransfer lmc_transfer(lmc_key_value_cache, target_device,
+                    /*copy_to_device=*/!direction,
+                    /*copy_back=*/direction);
+    torch::Tensor lmc_key_value_cache_device = lmc_transfer.tensor();
 
-  int64_t* lmc_key_value_cache_ptr = static_cast<int64_t*>(gpu_lmc_key_value_cache.data_ptr());
+    torch::Tensor slot_mapping_device =
+      ensure_tensor_on_device(slot_mapping, target_device);
 
-  int64_t* vllm_key_value_cache_ptr =
-      get_kernel_ptr<int64_t, torch::Tensor>(vllm_key_value_cache);
-  // int64_t* vllm_value_cache_ptr =
-  //     get_kernel_ptr<int64_t, torch::Tensor>(vllm_value_cache);
-
-  torch::Tensor gpu_slot_mapping = slot_mapping;
-  if (slot_mapping.device().is_cpu()) {
-    gpu_slot_mapping = slot_mapping.to(torch::device(torch::kCUDA, 0));
-  }
-  const int64_t* slot_mapping_ptr =
-      get_kernel_ptr<const int64_t, const torch::Tensor>(gpu_slot_mapping);
+    int64_t* lmc_key_value_cache_ptr =
+      lmc_key_value_cache_device.data_ptr<int64_t>();
+    int64_t* vllm_key_value_cache_ptr =
+      vllm_key_value_cache.data_ptr<int64_t>();
+    const int64_t* slot_mapping_ptr =
+      slot_mapping_device.data_ptr<int64_t>();
 
   int elements_per_entry = 8 / vllm_key_value_cache.element_size();
 
-  int num_tokens = slot_mapping.size(0);
+  int num_tokens = slot_mapping_device.size(0);
   int num_heads = vllm_key_value_cache.size(3);
-  int head_size_in_64bit = vllm_key_value_cache.size(4) / elements_per_entry;
+  int head_size_in_64bit =
+      vllm_key_value_cache.size(4) / elements_per_entry;
 
   int block_size = vllm_key_value_cache.size(2);
 
   int lmc_stride;
   int lmc_value_offset;
   if (token_major) {
-    lmc_stride = lmc_key_value_cache.stride(0) / elements_per_entry;
-    lmc_value_offset = lmc_key_value_cache.stride(1) / elements_per_entry;
+    lmc_stride =
+        lmc_key_value_cache_device.stride(0) / elements_per_entry;
+    lmc_value_offset =
+        lmc_key_value_cache_device.stride(1) / elements_per_entry;
   } else {
-    lmc_stride = lmc_key_value_cache.stride(1) / elements_per_entry;
-    lmc_value_offset = lmc_key_value_cache.stride(0) / elements_per_entry;
+    lmc_stride =
+        lmc_key_value_cache_device.stride(1) / elements_per_entry;
+    lmc_value_offset =
+        lmc_key_value_cache_device.stride(0) / elements_per_entry;
   }
 
   int vllm_block_key_stride_in_64bit;
@@ -607,23 +649,20 @@ void single_layer_kv_transfer(
   dim3 block(std::min(num_heads * head_size_in_64bit, 128));
   const at::cuda::OptionalCUDAGuard device_guard(
       device_of(vllm_key_value_cache));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   lmc::single_layer_kv_transfer_kernel<int64_t><<<grid, block, 0, stream>>>(
       lmc_key_value_cache_ptr, vllm_key_value_cache_ptr, slot_mapping_ptr,
       vllm_block_key_stride_in_64bit, vllm_value_offset, lmc_stride,
       lmc_value_offset, num_heads, head_size_in_64bit, block_size, direction);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  if (direction) {
-    // Copy back from GPU to CPU
-    cudaMemcpyAsync(lmc_key_value_cache.data_ptr(), gpu_lmc_key_value_cache.data_ptr(), lmc_key_value_cache.numel() * lmc_key_value_cache.element_size(), cudaMemcpyDeviceToHost, stream);
-  }
+  lmc_transfer.copy_back();
 }
 
 void load_and_reshape_flash(
     torch::Tensor&
         key_value,  // [2, num_layer, num_tokens, num_heads*head_size]
-                    // key/value must be on cpu (non-pinned)
+                    // key/value must be on gpu/pinned cpu
 
     torch::Tensor& key_cache,  // [num_blocks, block_size, num_heads, head_size]
     torch::Tensor&
@@ -631,40 +670,37 @@ void load_and_reshape_flash(
                       // key_cache/value_cache must be on gpu
     torch::Tensor& slot_mapping,  // [num_tokens],
     const int layer_idx) {
-  // Allocate GPU buffer for key_value since it's on CPU non-pinned
-  torch::Tensor gpu_key_value = torch::empty_like(key_value, torch::device(torch::kCUDA, 0));
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    const c10::Device target_device = key_cache.device();
 
-  // For load_and_reshape_flash, it's loading from cache to key_value, so direction is true (PagedBuffer to LMCache)
-  // No initial copy, copy back after
+    TensorDeviceTransfer key_value_transfer(
+      key_value, target_device, /*copy_to_device=*/false,
+      /*copy_back=*/true);
+    torch::Tensor key_value_device = key_value_transfer.tensor();
 
-  int64_t* key_value_ptr = static_cast<int64_t*>(gpu_key_value.data_ptr());
+    torch::Tensor slot_mapping_device =
+      ensure_tensor_on_device(slot_mapping, target_device);
 
-  int64_t* key_cache_ptr = get_kernel_ptr<int64_t, torch::Tensor>(key_cache);
-  int64_t* value_cache_ptr =
-      get_kernel_ptr<int64_t, torch::Tensor>(value_cache);
-
-  torch::Tensor gpu_slot_mapping = slot_mapping;
-  if (slot_mapping.device().is_cpu()) {
-    gpu_slot_mapping = slot_mapping.to(torch::device(torch::kCUDA, 0));
-  }
-  const int64_t* slot_mapping_ptr =
-      get_kernel_ptr<const int64_t, const torch::Tensor>(gpu_slot_mapping);
+    int64_t* key_value_ptr = key_value_device.data_ptr<int64_t>();
+    int64_t* key_cache_ptr = key_cache.data_ptr<int64_t>();
+    int64_t* value_cache_ptr = value_cache.data_ptr<int64_t>();
+    const int64_t* slot_mapping_ptr =
+      slot_mapping_device.data_ptr<int64_t>();
 
   int elements_per_entry = 8 / key_cache.element_size();
 
-  int num_tokens = slot_mapping.size(0);
+  int num_tokens = slot_mapping_device.size(0);
   int num_heads = key_cache.size(2);
   int head_size_in_64bit = key_cache.size(3) / elements_per_entry;
 
   int block_size = key_cache.size(1);
 
-  int key_value_stride = key_value.stride(2) / elements_per_entry;
+  int key_value_stride = key_value_device.stride(2) / elements_per_entry;
 
   int num_layers = key_value.size(1);
-  int key_layer_offset = layer_idx * key_value.stride(1) / elements_per_entry;
-  int value_layer_offset =
-      (layer_idx + num_layers) * key_value.stride(1) / elements_per_entry;
+    int key_layer_offset =
+      layer_idx * key_value_device.stride(1) / elements_per_entry;
+    int value_layer_offset = (layer_idx + num_layers) *
+                 key_value_device.stride(1) / elements_per_entry;
 
   int block_stride_in_64bit = key_cache.stride(0) / elements_per_entry;
   TORCH_CHECK(key_cache.stride(0) == value_cache.stride(0));
@@ -672,21 +708,20 @@ void load_and_reshape_flash(
   dim3 grid(num_tokens);
   dim3 block(std::min(num_heads * head_size_in_64bit, 128));
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key_cache));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   lmc::load_and_reshape_flash_kernel<int64_t><<<grid, block, 0, stream>>>(
       key_value_ptr, key_cache_ptr, value_cache_ptr, slot_mapping_ptr,
       block_stride_in_64bit, key_value_stride, num_heads, head_size_in_64bit,
       block_size, key_layer_offset, value_layer_offset);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  // Copy back from GPU to CPU
-  cudaMemcpyAsync(key_value.data_ptr(), gpu_key_value.data_ptr(), key_value.numel() * key_value.element_size(), cudaMemcpyDeviceToHost, stream);
+  key_value_transfer.copy_back();
 }
 
 void reshape_and_cache_back_flash(
     torch::Tensor&
         key_value,  // [2, num_layer, num_tokens, num_heads*head_size]
-                    // key/value must be on cpu (non-pinned)
+                    // key/value must be on gpu/pinned cpu
 
     torch::Tensor& key_cache,  // [num_blocks, block_size, num_heads, head_size]
     torch::Tensor&
@@ -694,41 +729,37 @@ void reshape_and_cache_back_flash(
                       // key_cache/value_cache must be on gpu
     torch::Tensor& slot_mapping,  // [num_tokens]
     const int layer_idx) {
-  // Allocate GPU buffer for key_value since it's on CPU non-pinned
-  torch::Tensor gpu_key_value = torch::empty_like(key_value, torch::device(torch::kCUDA, 0));
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    const c10::Device target_device = key_cache.device();
 
-  // For reshape_and_cache_back_flash, it's storing to cache, so direction false (LMCache to PagedBuffer)
-  // Copy CPU to GPU first
-  cudaMemcpyAsync(gpu_key_value.data_ptr(), key_value.data_ptr(), key_value.numel() * key_value.element_size(), cudaMemcpyHostToDevice, stream);
+    TensorDeviceTransfer key_value_transfer(
+      key_value, target_device, /*copy_to_device=*/true,
+      /*copy_back=*/false);
+    torch::Tensor key_value_device = key_value_transfer.tensor();
 
-  int64_t* key_cache_ptr = get_kernel_ptr<int64_t, torch::Tensor>(key_cache);
-  int64_t* value_cache_ptr =
-      get_kernel_ptr<int64_t, torch::Tensor>(value_cache);
+    torch::Tensor slot_mapping_device =
+      ensure_tensor_on_device(slot_mapping, target_device);
 
-  int64_t* key_value_ptr = static_cast<int64_t*>(gpu_key_value.data_ptr());
-
-  torch::Tensor gpu_slot_mapping = slot_mapping;
-  if (slot_mapping.device().is_cpu()) {
-    gpu_slot_mapping = slot_mapping.to(torch::device(torch::kCUDA, 0));
-  }
-  const int64_t* slot_mapping_ptr =
-      get_kernel_ptr<const int64_t, const torch::Tensor>(gpu_slot_mapping);
+    int64_t* key_cache_ptr = key_cache.data_ptr<int64_t>();
+    int64_t* value_cache_ptr = value_cache.data_ptr<int64_t>();
+    int64_t* key_value_ptr = key_value_device.data_ptr<int64_t>();
+    const int64_t* slot_mapping_ptr =
+      slot_mapping_device.data_ptr<int64_t>();
 
   int elements_per_entry = 8 / key_cache.element_size();
 
-  int num_tokens = slot_mapping.size(0);
+  int num_tokens = slot_mapping_device.size(0);
   int num_heads = key_cache.size(2);
   int head_size_in_64bit = key_cache.size(3) / elements_per_entry;
 
   int block_size = key_cache.size(1);
 
-  int key_value_stride = key_value.stride(2) / elements_per_entry;
+  int key_value_stride = key_value_device.stride(2) / elements_per_entry;
 
   int num_layers = key_value.size(1);
-  int key_layer_offset = layer_idx * key_value.stride(1) / elements_per_entry;
-  int value_layer_offset =
-      (layer_idx + num_layers) * key_value.stride(1) / elements_per_entry;
+    int key_layer_offset =
+      layer_idx * key_value_device.stride(1) / elements_per_entry;
+    int value_layer_offset = (layer_idx + num_layers) *
+                 key_value_device.stride(1) / elements_per_entry;
 
   int block_stride_in_64bit = key_cache.stride(0) / elements_per_entry;
   TORCH_CHECK(key_cache.stride(0) == value_cache.stride(0));
@@ -736,6 +767,7 @@ void reshape_and_cache_back_flash(
   dim3 grid(num_tokens);
   dim3 block(std::min(num_heads * head_size_in_64bit, 128));
   const at::cuda::OptionalCUDAGuard device_guard(device_of(key_cache));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   lmc::reshape_and_cache_back_flash_kernel<int64_t><<<grid, block, 0, stream>>>(
       key_value_ptr, key_cache_ptr, value_cache_ptr, slot_mapping_ptr,
@@ -751,7 +783,6 @@ void single_layer_kv_transfer_sgl(
     torch::Tensor& lmc_key_value_cache,  // [num_tokens, 2, num_heads*head_size]
                                          // or
                                          // [2, num_tokens, num_heads*head_size]
-                                         // must be on cpu (non-pinned)
 
     torch::Tensor&
         sgl_key_cache,  // [num_blocks, block_size, num_heads, head_size]
@@ -766,33 +797,31 @@ void single_layer_kv_transfer_sgl(
                             // false: lmc_key_value_cache is
                             // [2, num_tokens, num_heads*head_size]
 ) {
-  // Allocate GPU buffer for lmc_key_value_cache since it's on CPU non-pinned
-  torch::Tensor gpu_lmc_key_value_cache = torch::empty_like(lmc_key_value_cache, torch::device(torch::kCUDA, 0));
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  // int64_t* lmc_key_cache_ptr = get_kernel_ptr<int64_t,
+  // torch::Tensor>(lmc_key_cache); int64_t* lmc_value_cache_ptr =
+  // get_kernel_ptr<int64_t, torch::Tensor>(lmc_value_cache);
+    const c10::Device target_device = sgl_key_cache.device();
 
-  if (direction) {  // PagedBuffer to LMCache: need to copy back after kernel
-    // No initial copy needed
-  } else {  // LMCache to PagedBuffer: copy CPU to GPU first
-    cudaMemcpyAsync(gpu_lmc_key_value_cache.data_ptr(), lmc_key_value_cache.data_ptr(), lmc_key_value_cache.numel() * lmc_key_value_cache.element_size(), cudaMemcpyHostToDevice, stream);
-  }
+    TensorDeviceTransfer lmc_transfer(lmc_key_value_cache, target_device,
+                    /*copy_to_device=*/!direction,
+                    /*copy_back=*/direction);
+    torch::Tensor lmc_key_value_cache_device = lmc_transfer.tensor();
 
-  int64_t* lmc_key_value_cache_ptr = static_cast<int64_t*>(gpu_lmc_key_value_cache.data_ptr());
+    torch::Tensor slot_mapping_device =
+      ensure_tensor_on_device(slot_mapping, target_device);
 
-  int64_t* sgl_key_cache_ptr =
-      get_kernel_ptr<int64_t, torch::Tensor>(sgl_key_cache);
-  int64_t* sgl_value_cache_ptr =
-      get_kernel_ptr<int64_t, torch::Tensor>(sgl_value_cache);
+    int64_t* lmc_key_value_cache_ptr =
+      lmc_key_value_cache_device.data_ptr<int64_t>();
 
-  torch::Tensor gpu_slot_mapping = slot_mapping;
-  if (slot_mapping.device().is_cpu()) {
-    gpu_slot_mapping = slot_mapping.to(torch::device(torch::kCUDA, 0));
-  }
-  const int64_t* slot_mapping_ptr =
-      get_kernel_ptr<const int64_t, const torch::Tensor>(gpu_slot_mapping);
+    int64_t* sgl_key_cache_ptr = sgl_key_cache.data_ptr<int64_t>();
+    int64_t* sgl_value_cache_ptr = sgl_value_cache.data_ptr<int64_t>();
+
+    const int64_t* slot_mapping_ptr =
+      slot_mapping_device.data_ptr<int64_t>();
 
   int elements_per_entry = 8 / sgl_key_cache.element_size();
 
-  int num_tokens = slot_mapping.size(0);
+  int num_tokens = slot_mapping_device.size(0);
   int num_heads = sgl_key_cache.size(2);
   int head_size_in_64bit = sgl_key_cache.size(3) / elements_per_entry;
 
@@ -801,11 +830,15 @@ void single_layer_kv_transfer_sgl(
   int lmc_stride;
   int lmc_value_offset;
   if (token_major) {
-    lmc_stride = lmc_key_value_cache.stride(0) / elements_per_entry;
-    lmc_value_offset = lmc_key_value_cache.stride(1) / elements_per_entry;
+    lmc_stride =
+        lmc_key_value_cache_device.stride(0) / elements_per_entry;
+    lmc_value_offset =
+        lmc_key_value_cache_device.stride(1) / elements_per_entry;
   } else {
-    lmc_stride = lmc_key_value_cache.stride(1) / elements_per_entry;
-    lmc_value_offset = lmc_key_value_cache.stride(0) / elements_per_entry;
+    lmc_stride =
+        lmc_key_value_cache_device.stride(1) / elements_per_entry;
+    lmc_value_offset =
+        lmc_key_value_cache_device.stride(0) / elements_per_entry;
   }
 
   int block_stride_in_64bit = sgl_key_cache.stride(0) / elements_per_entry;
@@ -814,15 +847,12 @@ void single_layer_kv_transfer_sgl(
   dim3 grid(num_tokens);
   dim3 block(std::min(num_heads * head_size_in_64bit, 128));
   const at::cuda::OptionalCUDAGuard device_guard(device_of(sgl_key_cache));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   lmc::single_layer_kv_transfer_sgl_kernel<int64_t><<<grid, block, 0, stream>>>(
       lmc_key_value_cache_ptr, sgl_key_cache_ptr, sgl_value_cache_ptr,
       slot_mapping_ptr, block_stride_in_64bit, lmc_stride, lmc_value_offset,
       num_heads, head_size_in_64bit, block_size, direction);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  if (direction) {
-    // Copy back from GPU to CPU
-    cudaMemcpyAsync(lmc_key_value_cache.data_ptr(), gpu_lmc_key_value_cache.data_ptr(), lmc_key_value_cache.numel() * lmc_key_value_cache.element_size(), cudaMemcpyDeviceToHost, stream);
-  }
+  lmc_transfer.copy_back();
 }

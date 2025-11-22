@@ -305,7 +305,7 @@ def _allocate_cpu_memory(
     if size == 0:
         return torch.empty(0, dtype=torch.uint8)
     if numa_mapping:
-        logger.info("[*] Allocating NUMA-aware pinned memory")
+        logger.info("[*] Allocating NUMA-aware host memory")
         if torch.cuda.is_available():
             current_device_id = torch.cuda.current_device()
         else:
@@ -318,7 +318,7 @@ def _allocate_cpu_memory(
         logger.info(f"[*] Current device ID: {current_device_id}, NUMA ID: {numa_id}")
         ptr = lmc_ops.alloc_pinned_numa_ptr(size, numa_id)
     else:
-        logger.info("[*] Allocating pinned memory")
+        logger.info("[*] Allocating host memory")
         ptr = lmc_ops.alloc_pinned_ptr(size, 0)
     logger.info(f"[*] Allocated memory pointer: {ptr}")
 
@@ -1277,7 +1277,7 @@ class PagedTensorMemoryAllocator(MemoryAllocatorInterface):
 
 
 class BufferAllocator(MemoryAllocatorInterface):
-    """Allocates memory in the pre-allocated pinned memory."""
+    """Allocates memory in a pre-allocated byte buffer."""
 
     def __init__(self, device="cpu"):
         """
@@ -1330,11 +1330,11 @@ class BufferAllocator(MemoryAllocatorInterface):
 
 
 class HostMemoryAllocator(MemoryAllocatorInterface):
-    """Allocates memory in the pre-allocated Host memory."""
+    """Allocates memory in pre-allocated host memory."""
 
     def __init__(self, size: int, use_paging: bool = False, **kwargs):
         """
-        :param int size: The size of the pinned memory in bytes.
+        :param int size: The size of the host memory in bytes.
         """
         buffer = torch.empty(size, dtype=torch.uint8, device="cpu")
 
@@ -1407,7 +1407,7 @@ class HostMemoryAllocator(MemoryAllocatorInterface):
 
 
 class PinMemoryAllocator(MemoryAllocatorInterface):
-    """Allocates memory in the pre-allocated pinned memory."""
+    """Allocates memory in a pre-allocated host buffer (formerly pinned)."""
 
     def __init__(self, size: int, use_paging: bool = False, **kwargs):
         """
@@ -1502,7 +1502,7 @@ class PinMemoryAllocator(MemoryAllocatorInterface):
 
 class MixedMemoryAllocator(MemoryAllocatorInterface):
     """
-    Allocates (1) memory in the pre-allocated pinned memory.
+    Allocates (1) memory in the pre-allocated host buffer.
               (2) byte_array buffer memory.
     """
 
@@ -1545,7 +1545,7 @@ class MixedMemoryAllocator(MemoryAllocatorInterface):
 
         self.host_mem_lock = threading.Lock() if not use_paging else nullcontext()
         logger.info(
-            f"MixedMemoryAllocator initialized with pinned memory size: {size} bytes"
+            f"MixedMemoryAllocator initialized with host memory size: {size} bytes"
         )
         self.buffer_allocator = BufferAllocator("cpu")
 
