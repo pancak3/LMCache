@@ -348,7 +348,7 @@ class ChunkedTokenDatabase(TokenDatabase):
             logger.info(f'[*] total_len: {total_len}')
             logger.info(f'[*] num_falses: {num_falses}')
             logger.info(f'[*] token_chunks: {token_chunks}')
-            logger.info(f'[*] prefix_hashes: {list(prefix_hashes)}')
+            # logger.info(f'[*] prefix_hashes: {list(prefix_hashes)}')
 
             for chunk_id, hash_val in enumerate(prefix_hashes):
                 start_idx = chunk_id * self.chunk_size
