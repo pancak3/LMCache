@@ -356,7 +356,9 @@ class ChunkedTokenDatabase(TokenDatabase):
                 if start_idx < num_falses:
                     continue
                 else:
+                    logger.info(f'[*] make_key: {make_key}, start_idx: {start_idx}, end_idx: {end_idx}, hash_val: {hash_val}')
                     if make_key:
+                        logger.info(f'[*] make_key results: {self._make_key_by_hash(hash_val, request_configs)}')
                         yield (
                             start_idx,
                             end_idx,
