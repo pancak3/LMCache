@@ -353,6 +353,7 @@ class ChunkedTokenDatabase(TokenDatabase):
             for chunk_id, hash_val in enumerate(prefix_hashes):
                 start_idx = chunk_id * self.chunk_size
                 end_idx = min(start_idx + self.chunk_size, total_len)
+                logger.info(f'[*] chunk_id: {chunk_id}, chunk_size: {self.chunk_size}, start_idx: {start_idx}, end_idx: {end_idx}, hash_val: {hash_val}')
                 if start_idx < num_falses:
                     continue
                 else:
