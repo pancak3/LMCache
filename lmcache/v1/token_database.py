@@ -339,11 +339,17 @@ class ChunkedTokenDatabase(TokenDatabase):
             raise ValueError(
                 "The number of Falses in the mask is not a multiple of the chunk size."
             )
-
         if tokens is not None:
             total_len = len(tokens)
             token_chunks = self._chunk_tokens(tokens)
             prefix_hashes = self._prefix_hash(token_chunks)
+            
+            logger.info(f'[*] tokens: {tokens}')
+            logger.info(f'[*] total_len: {total_len}')
+            logger.info(f'[*] num_falses: {num_falses}')
+            logger.info(f'[*] token_chunks: {token_chunks}')
+            logger.info(f'[*] prefix_hashes: {list(prefix_hashes)}')
+
             for chunk_id, hash_val in enumerate(prefix_hashes):
                 start_idx = chunk_id * self.chunk_size
                 end_idx = min(start_idx + self.chunk_size, total_len)
