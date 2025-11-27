@@ -291,6 +291,7 @@ class ChunkedTokenDatabase(TokenDatabase):
         prefix_hash = self._get_init_hash()
         for token_chunk in token_chunks:
             prefix_hash = self._hash_tokens(token_chunk, prefix_hash)
+            logger.info(f"[*] Hashed chunk: tokens={token_chunk}, prefix_hash={prefix_hash}")
             yield prefix_hash
 
     @_lmcache_nvtx_annotate
