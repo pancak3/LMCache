@@ -76,6 +76,7 @@ class KVController:
         location = msg.location
         if key not in self.kv_pool:
             self.kv_pool[key] = []
+        print(f"[*] Admitting KV chunk: instance_id={instance_id}, worker_id={worker_id}, key={key}, location={location}")
         self.kv_pool[key].append(KVChunkMetadata(instance_id, worker_id, location))
 
     async def evict(self, msg: KVEvictMsg) -> None:
@@ -164,10 +165,13 @@ class KVController:
     # TODO(Jiayi): Need to get rid of the hash somehow
     async def lookup(self, msg: LookupMsg) -> LookupRetMsg:
         tokens = msg.tokens
+        print(f"[*] lookup tokens: {tokens}")
+        print(f"[*] current kv_pool keys: {list(self.kv_pool.keys())}")
         layout_info = {}
         for start, end, key in self.token_database.process_tokens(
             tokens, make_key=False
         ):
+            print(f"[*] lookup key: {key}, start: {start}, end: {end}")
             if key not in self.kv_pool:
                 break
             matched_instance = self.kv_pool[key][0].instance_id
