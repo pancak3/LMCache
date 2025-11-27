@@ -291,7 +291,6 @@ class ChunkedTokenDatabase(TokenDatabase):
         prefix_hash = self._get_init_hash()
         for token_chunk in token_chunks:
             prefix_hash = self._hash_tokens(token_chunk, prefix_hash)
-            logger.info(f"[*] Hashed chunk: tokens={token_chunk}, prefix_hash={prefix_hash}")
             yield prefix_hash
 
     @_lmcache_nvtx_annotate
@@ -345,22 +344,13 @@ class ChunkedTokenDatabase(TokenDatabase):
             token_chunks = self._chunk_tokens(tokens)
             prefix_hashes = self._prefix_hash(token_chunks)
             
-            logger.info(f'[*] tokens: {tokens}')
-            logger.info(f'[*] total_len: {total_len}')
-            logger.info(f'[*] num_falses: {num_falses}')
-            logger.info(f'[*] token_chunks: {token_chunks}')
-            # logger.info(f'[*] prefix_hashes: {list(prefix_hashes)}')
-
             for chunk_id, hash_val in enumerate(prefix_hashes):
                 start_idx = chunk_id * self.chunk_size
                 end_idx = min(start_idx + self.chunk_size, total_len)
-                logger.info(f'[*] chunk_id: {chunk_id}, chunk_size: {self.chunk_size}, start_idx: {start_idx}, end_idx: {end_idx}, hash_val: {hash_val}')
                 if start_idx < num_falses:
                     continue
                 else:
-                    logger.info(f'[*] make_key: {make_key}, start_idx: {start_idx}, end_idx: {end_idx}, hash_val: {hash_val}')
                     if make_key:
-                        logger.info(f'[*] make_key results: {self._make_key_by_hash(hash_val, request_configs)}')
                         yield (
                             start_idx,
                             end_idx,

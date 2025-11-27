@@ -13,7 +13,6 @@
 uintptr_t alloc_pinned_ptr(size_t size, unsigned int flags) {
   (void)flags;
   void* ptr = std::malloc(size);
-  std::cout << "[*] Allocating host memory of size: " << size << " bytes\n";
   if (ptr == nullptr) {
     throw std::bad_alloc();
   }
