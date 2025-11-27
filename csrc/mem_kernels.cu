@@ -631,9 +631,9 @@ void single_layer_kv_transfer(
   int elements_per_entry = 8 / vllm_key_value_cache.element_size();
 
   int num_tokens = slot_mapping_device.size(0);
-  int num_heads = vllm_key_value_cache.size(3);
-  int head_size_in_64bit =
-      vllm_key_value_cache.size(4) / elements_per_entry;
+  int num_heads;
+  int head_size_in_64bit;
+  int block_size;
 
   if (use_mla) {
     // MLA format: [num_blocks, block_size, head_size]
@@ -686,10 +686,17 @@ void single_layer_kv_transfer(
       device_of(vllm_key_value_cache));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  lmc::single_layer_kv_transfer_kernel<int64_t><<<grid, block, 0, stream>>>(
-      lmc_key_value_cache_ptr, vllm_key_value_cache_ptr, slot_mapping_ptr,
-      vllm_block_key_stride_in_64bit, vllm_value_offset, lmc_stride,
-      lmc_value_offset, num_heads, head_size_in_64bit, block_size, direction);
+  if (use_mla) {
+    lmc::single_layer_kv_transfer_kernel<int64_t, true><<<grid, block, 0, stream>>>(
+        lmc_key_value_cache_ptr, vllm_key_value_cache_ptr, slot_mapping_ptr,
+        vllm_block_key_stride_in_64bit, vllm_value_offset, lmc_stride,
+        lmc_value_offset, num_heads, head_size_in_64bit, block_size, direction);
+  } else {
+    lmc::single_layer_kv_transfer_kernel<int64_t, false><<<grid, block, 0, stream>>>(
+        lmc_key_value_cache_ptr, vllm_key_value_cache_ptr, slot_mapping_ptr,
+        vllm_block_key_stride_in_64bit, vllm_value_offset, lmc_stride,
+        lmc_value_offset, num_heads, head_size_in_64bit, block_size, direction);
+  }
 
   lmc_transfer.copy_back();
 }
