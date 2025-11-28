@@ -12,11 +12,13 @@
 
 uintptr_t alloc_pinned_ptr(size_t size, unsigned int flags) {
   (void)flags;
+  std::cout << "[*] Allocating non-pinned memory of size " << size << " bytes" << std::endl;
   void* ptr = std::malloc(size);
   if (ptr == nullptr) {
     throw std::bad_alloc();
   }
   std::memset(ptr, 0, size);
+  std::cout << "[*] Finished allocating non-pinned memory" << std::endl;
   return reinterpret_cast<uintptr_t>(ptr);
 }
 

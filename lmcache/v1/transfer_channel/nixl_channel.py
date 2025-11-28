@@ -328,9 +328,6 @@ class NixlChannel(BaseTransferChannel):
 
     async def _async_init_loop(self):
         # Initialize initialization side channels
-        print("[*] Starting NIXL async init loop")
-        print(f"[*] ZMQ context: {self.zmq_context}")
-        print(f"[*] Peer init URL: {self.peer_init_url}")
 
         self.init_side_channel = get_zmq_socket(
             self.zmq_context,
