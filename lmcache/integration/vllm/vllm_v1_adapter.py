@@ -378,16 +378,17 @@ class ReqMeta:
         num_blocks = len(tracker.allocated_block_ids)
 
         if len(token_ids) > num_blocks * block_size:
-            logger.error(
-                "The number of tokens is more than the number of blocks."
-                "Something might be wrong in scheduling logic!"
-            )
-            logger.error(
-                "Num tokens: %d, num blocks: %d, block size: %d",
-                len(token_ids),
-                num_blocks,
-                block_size,
-            )
+            # logger.error(
+            #     "The number of tokens is more than the number of blocks."
+            #     "Something might be wrong in scheduling logic!"
+            # )
+            # logger.error(
+            #     "Num tokens: %d, num blocks: %d, block size: %d",
+            #     len(token_ids),
+            #     num_blocks,
+            #     block_size,
+            # )
+            token_ids = token_ids[: num_blocks * block_size]
 
         block_ids = torch.tensor(tracker.allocated_block_ids, dtype=torch.long)
         block_offsets = torch.arange(0, block_size, dtype=torch.long)
@@ -396,7 +397,10 @@ class ReqMeta:
             + block_ids.reshape((num_blocks, 1)) * block_size
         )
 
-        slot_mapping = slot_mapping.flatten()[: len(token_ids)]
+        slot_mapping = slot_mapping.flatten()
+        if len(token_ids) > len(slot_mapping):
+            token_ids = token_ids[: len(slot_mapping)]
+        slot_mapping = slot_mapping[: len(token_ids)] 
         assert slot_mapping.dtype == torch.long  # TODO: this could be removed
 
         # For load operation: check whether the request is scheduled to load
@@ -1178,6 +1182,10 @@ class LMCacheConnectorV1Impl:
 
                 slot_mapping = request.slot_mapping
                 assert isinstance(slot_mapping, torch.Tensor)
+                if len(slot_mapping) > len(token_ids):
+                    slot_mapping = slot_mapping[: len(token_ids)]
+                else:
+                    token_ids = token_ids[: len(slot_mapping)]  
                 assert len(slot_mapping) == len(token_ids)
 
                 # TODO: have a pre-allocated buffer to hold the slot_mappings
@@ -1267,6 +1275,10 @@ class LMCacheConnectorV1Impl:
 
             slot_mapping = request.slot_mapping
             assert isinstance(slot_mapping, torch.Tensor)
+            if len(slot_mapping) > len(token_ids):
+                slot_mapping = slot_mapping[: len(token_ids)]
+            else:
+                token_ids = token_ids[: len(slot_mapping)]
             assert len(slot_mapping) == len(token_ids)
 
             # TODO: have a pre-allocated buffer to hold the slot_mappings
