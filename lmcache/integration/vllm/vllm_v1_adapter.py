@@ -388,6 +388,7 @@ class ReqMeta:
                 num_blocks,
                 block_size,
             )
+            token_ids = token_ids[: num_blocks * block_size]
 
         block_ids = torch.tensor(tracker.allocated_block_ids, dtype=torch.long)
         block_offsets = torch.arange(0, block_size, dtype=torch.long)
@@ -1178,6 +1179,8 @@ class LMCacheConnectorV1Impl:
 
                 slot_mapping = request.slot_mapping
                 assert isinstance(slot_mapping, torch.Tensor)
+                slot_mapping = slot_mapping[:len(token_ids)]
+                token_ids = token_ids[: len(slot_mapping)]  
                 assert len(slot_mapping) == len(token_ids)
 
                 # TODO: have a pre-allocated buffer to hold the slot_mappings
@@ -1267,6 +1270,8 @@ class LMCacheConnectorV1Impl:
 
             slot_mapping = request.slot_mapping
             assert isinstance(slot_mapping, torch.Tensor)
+            slot_mapping = slot_mapping[:len(token_ids)]
+            token_ids = token_ids[: len(slot_mapping)]
             assert len(slot_mapping) == len(token_ids)
 
             # TODO: have a pre-allocated buffer to hold the slot_mappings
